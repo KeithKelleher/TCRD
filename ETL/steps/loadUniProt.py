@@ -1,7 +1,7 @@
 from lxml import objectify
 from airflow.models import Variable
 
-UP_HUMAN_FILE = './input_files/uniprot-short.xml'
+UP_HUMAN_FILE = './ETL/input_files/uniprot-short.xml'
 ECO_OBO_FILE = '../data/eco.obo'
 NS = '{http://uniprot.org/uniprot}'
 

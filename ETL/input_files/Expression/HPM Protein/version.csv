@@ -1,0 +1,4 @@
+version,A draft map of the human proteome (2014)
+release date,2014-05-29
+data,HPM_protein_level_expression_matrix_Kim_et_al_052914.csv
+manual map,../manual_uberon_map.tsv

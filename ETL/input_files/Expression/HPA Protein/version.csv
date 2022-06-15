@@ -1,0 +1,4 @@
+version,The Human Protein Atlas version 21.1
+release date,2022-05-31
+data,normal_tissue.tsv
+manual map,../manual_uberon_map.tsv

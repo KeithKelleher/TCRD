@@ -1,0 +1,4 @@
+version,TISSUES 2.0
+data,human_tissue_integrated_full.tsv
+manual map,../manual_uberon_map.tsv
+human entities,human_entities.tsv
