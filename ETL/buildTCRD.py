@@ -3,6 +3,7 @@ import os
 from airflow.models import Variable
 from airflow.operators.bash import BashOperator
 
+from buildUberonAncestry import createUberonAncestryDAG
 from copyOldTCRD import createCopyTCRDDag
 from util import getSqlFiles, doVersionInserts, version_is_same, getMysqlConnector, getBaseDirectory
 from airflow.operators.python import BranchPythonOperator, PythonOperator
@@ -14,15 +15,13 @@ from buildExpression import createExpressionDAG
 from airflow import DAG
 from airflow.utils.dates import days_ago
 
-DAG_NAME = 'rebuild-tcrd2'
+DAG_NAME = 'rebuild-tcrd3'
 copySchema = Variable.get('CopyTCRD')
 sqlFiles = getSqlFiles()
 schemaname = 'tcrdinfinity'
 mysqlConnectorID = schemaname
 directory = os.path.dirname(__file__) + '/'
 
-mysqlserver = getMysqlConnector()
-connection = mysqlserver.get_connection('tcrdinfinity')
 
 def check_input_versions(**kwargs):
     inputKey = kwargs['input']
@@ -53,12 +52,14 @@ dag = DAG(
 
 createTables = MySqlOperator(
     dag=dag,
-    task_id='create-version-table',
-    sql=sqlFiles['input_version.sql'],
+    task_id='create-new-tables',
+    sql=sqlFiles['input_version.sql'] + sqlFiles['ncats_unfiltered_counts.sql'],
     mysql_conn_id=mysqlConnectorID
 )
 
 def getDataSourceTasks(dag, key, subdagFunction, table):
+    mysqlserver = getMysqlConnector()
+    connection = mysqlserver.get_connection(schemaname)
     rebuild_task_id = 'rebuild-' + key + '-tables'
     tasks = {}
     tasks['is_updated'] = BranchPythonOperator(
@@ -97,6 +98,12 @@ def getDataSourceTasks(dag, key, subdagFunction, table):
     tasks['is_updated'] >> tasks['dump'] >> tasks['load'] >> tasks['save_metadata']
     return tasks
 
+pop_ancestry_task_id='populate-ancestry-table'
+populateAncestryTable = SubDagOperator(
+    dag=dag,
+    task_id=pop_ancestry_task_id,
+    subdag=createUberonAncestryDAG(DAG_NAME, pop_ancestry_task_id, dag.default_args)
+)
 
 copy_task_id = 'copy-old-tcrd'
 copyOldTCRD = SubDagOperator(
@@ -112,3 +119,5 @@ createTables >> gtexTasks['is_updated']
 
 expressionTasks = getDataSourceTasks(dag, 'Expression', createExpressionDAG, 'expression')
 createTables >> expressionTasks['is_updated']
+
+[gtexTasks['save_metadata'], expressionTasks['save_metadata']] >> populateAncestryTable

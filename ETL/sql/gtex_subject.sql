@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS `tcrdinfinity`.`gtex_subject`
+CREATE TABLE IF NOT EXISTS `gtex_subject`
 (
        `subject_id` VARCHAR(12) NOT NULL,
        `sex` ENUM('male', 'female') NOT NULL,

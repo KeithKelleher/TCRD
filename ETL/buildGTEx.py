@@ -1,5 +1,5 @@
-from util import calculateOneTissueSpecificity, getENSGMap, getSqlFiles, getMysqlConnector, getSampleTissueMap, \
-    getSexMap, getConfigFile, saveTissueSpecificityToTDLInfo, calculateRanks
+from util import calculateOneTissueSpecificity, getENSGMap, getSqlFiles, getMysqlConnector, getFilteredSampleTissueMap, \
+    getFilteredSexMap, getConfigFile, saveTissueSpecificityToTDLInfo, calculateRanks, get_dataSource_inserts
 from airflow import DAG
 from airflow.providers.mysql.operators.mysql import MySqlOperator
 from airflow.operators.python import PythonOperator
@@ -9,20 +9,33 @@ import pendulum
 
 sqlFiles = getSqlFiles()
 testing = False  # just do some rows of the input file, set to False do the full ETL
-testCount = 75
+testCount = 750
 mysqlConnectorID = 'tcrdinfinity'
 csv.field_size_limit(sys.maxsize)
 directory = os.path.dirname(__file__) + '/'
 
-def tauStrings():
-    return ['GTEx Tissue Specificity Index', 'GTEx Tissue Specificity Index - Male', 'GTEx Tissue Specificity Index - Female']
-
-def descriptions():
-    return [
-        'Tau as defined in Yanai, I. et. al., Bioinformatics 21(5): 650-659 (2005) calculated on GTEx data.',
-        'Tau as defined in Yanai, I. et. al., Bioinformatics 21(5): 650-659 (2005) calculated on GTEx data for male subjects.',
-        'Tau as defined in Yanai, I. et. al., Bioinformatics 21(5): 650-659 (2005) calculated on GTEx data for female subjects.',
-    ]
+full = "GTEx"
+male = "GTEx - Male"
+female = "GTEx = Female"
+gtexSources = {
+    full: {
+        'tauString': 'GTEx Tissue Specificity Index',
+        'tauDescription': 'Tau as defined in Yanai, I. et. al., Bioinformatics 21(5): 650-659 (2005) calculated on GTEx data.',
+        'dataSourceDescription': 'RNA-level expression values based on RNA-Seq experiments from GTEx. Numeric values represent the median transcripts per million for each gene in each tissue. Sex-specific values represent the median transcripts per million for the same data segregated by subject sex. Subjects are filtered to exclude those with a death_hardy score > 2. Samples are filtered to exclude those with a moderate or severe degree of autolylsis.',
+        'url': 'https://www.gtexportal.org/home/',
+        'license': '',
+        'licenseURL': '',
+        'citation': 'The Genotype-Tissue Expression (GTEx) Project was supported by the <a href="https://commonfund.nih.gov/GTEx" target="_blank">Common Fund</a> of the Office of the Director of the National Institutes of Health, and by NCI, NHGRI, NHLBI, NIDA, NIMH, and NINDS.'
+    },
+    male: {
+        'tauString': 'GTEx Tissue Specificity Index - Male',
+        'tauDescription': 'Tau as defined in Yanai, I. et. al., Bioinformatics 21(5): 650-659 (2005) calculated on GTEx data for male subjects.',
+    },
+    female: {
+        'tauString': 'GTEx Tissue Specificity Index - Female',
+        'tauDescription': 'Tau as defined in Yanai, I. et. al., Bioinformatics 21(5): 650-659 (2005) calculated on GTEx data for female subjects.',
+    }
+}
 
 def calculateMedian(values):
     return statistics.median(values) if (values != None and len(values) > 0) else None
@@ -59,9 +72,9 @@ def get_tdl_inserts(protein_id, allMedians, maleMedians, femaleMedians):
     maleTau = calculateOneTissueSpecificity(maleMedians)
     femaleTau = calculateOneTissueSpecificity(femaleMedians)
 
-    inserts.append((tauStrings()[0], protein_id, allTau))
-    inserts.append((tauStrings()[1], protein_id, maleTau))
-    inserts.append((tauStrings()[2], protein_id, femaleTau))
+    inserts.append((gtexSources[full]['tauString'], protein_id, allTau))
+    inserts.append((gtexSources[male]['tauString'], protein_id, maleTau))
+    inserts.append((gtexSources[female]['tauString'], protein_id, femaleTau))
     return inserts
 
 def formatUberon(dbValue):
@@ -72,9 +85,11 @@ def formatUberon(dbValue):
 def populateGtexTable():
     mysqlserver = getMysqlConnector()
     ensemblMap = getENSGMap()
-    tissueMap = getSampleTissueMap()
-    sexMap = getSexMap()
+    tissueMap = getFilteredSampleTissueMap()
+    sexMap = getFilteredSexMap()
     tdlInserts = []
+    inserts = []
+    proteinLists = {}
     dataFile = getConfigFile("GTEx", None, "data")
     with open(dataFile) as file:
         next(file), next(file) # first two lines are not data
@@ -82,6 +97,7 @@ def populateGtexTable():
         count = 0
         for geneRow in tsv_file:
             ensg_id = geneRow["Name"].split('.')[0]
+
             if ensg_id not in ensemblMap:
                 continue
 
@@ -92,6 +108,8 @@ def populateGtexTable():
                 if (key != 'Description' and key != 'Name'):
                     subject_id = get_subject_id(key)
                     expressionValue = float(geneRow[key])
+                    if key not in tissueMap or subject_id not in sexMap: # unmapped values either failed death_hardy criteria, or autolysis criteria
+                        continue
                     (tissue, uberon_id) = tissueMap[key]
                     if (sexMap[subject_id]=='male'):
                         addExpressionToDict(maleTissueDict, tissue, uberon_id, expressionValue)
@@ -129,17 +147,22 @@ def populateGtexTable():
                 expressionDetails.append(fmt_expression_detail_obj(protein_id, tissue, median_tpm, median_tpm_male, median_tpm_female))
 
             tdlInserts.extend(get_tdl_inserts(protein_id, allMedians, maleMedians, femaleMedians))
+            proteinLists[protein_id] = 1
+            inserts.extend(add_ranks_and_format_inserts(allMedians, femaleMedians, maleMedians, expressionDetails))
 
-            inserts = add_ranks_and_format_inserts(allMedians, femaleMedians, maleMedians, expressionDetails)
-
-            mysqlserver.insert_many_rows('gtex', inserts,
-                                         target_fields=('protein_id', 'tissue', 'tpm', 'tpm_rank', 'tpm_male',
-                                                        'tpm_male_rank', 'tpm_female', 'tpm_female_rank', 'uberon_id'))
             if (testing):
                 count = count + 1
                 if (count >= testCount):
                     break
-    saveTissueSpecificityToTDLInfo(tdlInserts, tauStrings(), descriptions())
+
+    mysqlserver.insert_many_rows('gtex', inserts, target_fields=('protein_id', 'tissue', 'tpm', 'tpm_rank', 'tpm_male',
+                                                        'tpm_male_rank', 'tpm_female', 'tpm_female_rank', 'uberon_id'))
+    dsInserts = get_dataSource_inserts(proteinLists, full)
+    mysqlserver.insert_rows('ncats_dataSource', [(full, gtexSources[full]['dataSourceDescription'], gtexSources[full]['url'], gtexSources[full]['license'], gtexSources[full]['licenseURL'], gtexSources[full]['citation'])],
+                            target_fields=('dataSource', 'dataSourceDescription', 'url', 'license', 'licenseURL', 'citation'))
+    mysqlserver.insert_many_rows('ncats_dataSource_map', dsInserts, target_fields=('dataSource', 'protein_id'))
+
+    saveTissueSpecificityToTDLInfo(tdlInserts, [gtexSources[key]['tauString'] for key in gtexSources],  [gtexSources[key]['tauDescription'] for key in gtexSources])
 
 
 def add_ranks_and_format_inserts(allMedians, femaleMedians, maleMedians, protein_expression_detail_list):
@@ -185,7 +208,9 @@ def createGTExDAG(parent_dag_name, child_task_id, args):
         sql=f"""DROP TABLE IF EXISTS `gtex_sample`;
                 DROP TABLE IF EXISTS `gtex_subject`;
                 DROP TABLE IF EXISTS `gtex`;
-                DELETE FROM `tdl_info` WHERE itype in ('{tauStrings()[0]}','{tauStrings()[1]}','{tauStrings()[2]}');""",
+                DELETE FROM `tdl_info` WHERE itype in ('{gtexSources[full]['tauString']}','{gtexSources[male]['tauString']}','{gtexSources[female]['tauString']}');
+                DELETE FROM `ncats_dataSource_map` where dataSource = '{full}';
+                DELETE FROM `ncats_dataSource` where dataSource = '{full}';""",
         mysql_conn_id=mysqlConnectorID
     )
 

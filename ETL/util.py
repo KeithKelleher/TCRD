@@ -12,6 +12,7 @@ from airflow.providers.mysql.hooks.mysql import MySqlHook
 
 directory = os.path.dirname(__file__) + '/'
 copySchema = Variable.get('CopyTCRD')
+schemaname = 'tcrdinfinity'
 
 def getBaseDirectory():
     return directory
@@ -42,7 +43,7 @@ def insert_many_rows(self, table, rows, target_fields=None, replace=False, **kwa
                 sql = self._generate_insert_sql(table, chunk[0], target_fields, replace, **kwargs)
                 self.log.debug("Generated sql: %s", sql)
                 cur.executemany(sql, chunk)
-                conn.commit()
+        conn.commit()
 
 def getchunks(l, n):
     n = max(1, n)
@@ -121,7 +122,10 @@ def doVersionInserts(input_key):
 def getDBVersions(input_key):
     fields = ','.join(field for field in getVersionInfoFields())
     mysqlserver = getMysqlConnector()
-    rows =  mysqlserver.get_records(f"""SELECT {fields} from {copySchema}.input_version where source_key = '{input_key}'""")
+    try:
+        rows =  mysqlserver.get_records(f"""SELECT {fields} from {copySchema}.input_version where source_key = '{input_key}'""")
+    except:
+        return []
     return dict((
         row[1] + '-' + row[2],
         {
@@ -137,6 +141,9 @@ def version_is_same(input_key):
     dbVersions = getDBVersions(input_key)
     if (len(fileVersions) == 0):
         raise Exception('no file versions found')
+    if (len(dbVersions) == 0):
+        print('No DB versions found : first time for ETL')
+        return False
     for fileKey in fileVersions:
         if fileKey in dbVersions:
             fileInfo = fileVersions[fileKey]
@@ -159,12 +166,18 @@ def version_is_same(input_key):
 def getTissueMap(manual_file):
     mysqlserver = getMysqlConnector()
     uberon_table = mysqlserver.get_records(f"""
-        SELECT name,uid from tcrdinfinity.uberon
+        SELECT name, uid from {schemaname}.uberon
     """)
     tissueMap = dict((tissue.lower(), uberon_id) for (tissue, uberon_id) in uberon_table)
     with open(manual_file) as mapFile:
         mapFile = csv.DictReader(mapFile, delimiter="\t", fieldnames=["tissue", "uberon_id"])
         return tissueMap | dict((row["tissue"].lower(), row["uberon_id"]) for row in mapFile)
+    return tissueMap | getManualMap(manual_file)
+
+def getManualMap(manual_file):
+    with open(manual_file) as mapFile:
+        mapFile = csv.DictReader(mapFile, delimiter="\t", fieldnames=["tissue", "uberon_id"])
+        return dict((row["tissue"].lower(), row["uberon_id"]) for row in mapFile)
 
 def getHumanEntities(file):
     map = {}
@@ -174,13 +187,36 @@ def getHumanEntities(file):
             map[row["entity"]]=1
     return map
 
+def getOntologyMap():
+    mysqlserver = getMysqlConnector()
+    mappings = mysqlserver.get_records(f"""
+SELECT 
+    CONCAT(db, ':', value), GROUP_CONCAT(uberon_xref.uid)
+FROM
+    uberon_xref,
+    uberon
+WHERE
+    uberon.uid = uberon_xref.uid
+        AND db = 'bto'
+        AND uberon.uid IN (SELECT DISTINCT
+            uid
+        FROM
+            uberon_xref
+        WHERE
+            db = 'fma')
+GROUP BY CONCAT(db, ':', value)
+ORDER BY COUNT(*) DESC
+    """)
+    return dict((bto_id, uberons.split(',')) for (bto_id, uberons) in mappings)
+
+
 def getENSGMap():
     mysqlserver = getMysqlConnector()
     xrefData = mysqlserver.get_records(f"""
         SELECT DISTINCT
             value, protein_id
         FROM
-            tcrdinfinity.xref
+            {schemaname}.xref
         WHERE
             xtype = 'Ensembl'
             and protein_id is not null
@@ -194,7 +230,7 @@ def getRefSeqMap():
             SUBSTRING_INDEX(value, '.', 1),
             GROUP_CONCAT(DISTINCT protein_id)
         FROM
-            tcrdinfinity.xref
+            {schemaname}.xref
         WHERE
             xtype = 'RefSeq'
         GROUP BY SUBSTRING_INDEX(value, '.', 1)
@@ -235,10 +271,11 @@ def getConfigFile(inputKey, innerKey, fieldKey):
 
 
 if __name__ == '__main__':
-    # print(doVersionInserts("GTEx"))
+    print(doVersionInserts("GTEx"))
     # print(doVersionInserts('Expression'))
-    print(version_is_same("GTEx"))
-    print(version_is_same("Expression"))
+    # print(version_is_same("GTEx"))
+    # print(version_is_same("Expression"))
+
 
 
 def calculateOneTissueSpecificity(list):
@@ -247,24 +284,25 @@ def calculateOneTissueSpecificity(list):
     return np.sum(1 - (list / np.max(list))) / (len(list)-1)
 
 
-def getSampleTissueMap():
+def getFilteredSampleTissueMap(): # remove samples with Moderate or Severe autolysis (SMATSSCR)
     mysqlserver = getMysqlConnector()
-    records = mysqlserver.get_records(f"""SELECT distinct SAMPID, SMTSD, SMUBRID FROM `gtex_sample`""")
+    records = mysqlserver.get_records(f"""SELECT distinct SAMPID, SMTSD, SMUBRID FROM `gtex_sample` WHERE SMATSSCR < 2""")
     return dict((x,(y,z)) for x,y,z in records)
 
 
-def getSexMap():
+def getFilteredSexMap(): # remove subjects where death_hardy > 2
     mysqlserver = getMysqlConnector()
-    records = mysqlserver.get_records(f"""SELECT subject_id, sex FROM `gtex_subject`""")
+    records = mysqlserver.get_records(f"""SELECT subject_id, sex FROM `gtex_subject` WHERE death_hardy <= 2""")
     return dict((x, y) for x, y in records)
 
 def calculateRanks(list):
+    maxVal = np.max(list)
+    if maxVal == 0:
+        return list
     ranks = scipy.stats.rankdata(list, method='average', axis=0) / len(list)
     maxim = np.max(ranks)
     minim = np.min(ranks)
     range = maxim - minim
-    if maxim == 0:
-        return list
     if range == 0:
         return ranks
     return (ranks - minim) / range
@@ -277,3 +315,10 @@ def saveTissueSpecificityToTDLInfo(inserts, itypes, descriptions):
 
     mysqlserver.insert_many_rows('tdl_info', inserts,
                             target_fields=('itype', 'protein_id', 'number_value'))
+
+
+def get_dataSource_inserts(proteinMap, dsKey):
+    inserts = []
+    for protein_id in proteinMap:
+        inserts.append((dsKey, protein_id))
+    return inserts

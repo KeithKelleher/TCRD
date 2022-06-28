@@ -5,6 +5,13 @@ from airflow.models import Variable
 from airflow.operators.python import PythonOperator
 sqlFiles = getSqlFiles()
 
+# see if anything went wrong with the foreign keys when renaming everything
+# select *
+# FROM
+# INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+# WHERE
+# REFERENCED_TABLE_SCHEMA = 'tcrdinfinity';
+
 def takeTCRDSnapshot():
     newName = Variable.get('NewTCRDName')
     oldName = 'tcrdinfinity'

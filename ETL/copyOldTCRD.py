@@ -13,9 +13,6 @@ schemaname = 'tcrdinfinity'
 mysqlConnectorID = schemaname
 directory = os.path.dirname(__file__) + '/'
 
-mysqlserver = getMysqlConnector()
-connection = mysqlserver.get_connection('tcrdinfinity')
-
 def check_input_versions(**kwargs):
     inputKey = kwargs['input']
     table = kwargs['table']
@@ -34,7 +31,53 @@ def saveMetadata(**kwargs):
     inputKey = kwargs['input']
     doVersionInserts(inputKey)
 
+def getTables():
+    mysqlserver = getMysqlConnector()
+
+    etlTables = [
+        'gtex', 'gtex-sample', 'gtex-subject', 'expression', 'ncats_unfiltered_counts', 'tissue', 'uberon_ancestry'
+    ]
+
+    unusedTables = [
+        "clinvar",
+        "clinvar_phenotype",
+        'expression_type',
+        "clinvar_phenotype_xref",
+        "compartment",
+        "compartment_type",
+        "do_xref",
+        "feature",
+        "homologene",
+        "idg_evol",
+        "knex_migrations",
+        "knex_migrations_lock",
+        "knex_migrations_post_deploy_dev",
+        "knex_migrations_post_deploy_dev_lock",
+        "knex_migrations_post_deploy_prod",
+        "knex_migrations_post_deploy_prod_lock",
+        "mlp_assay_info",
+        "ppi",
+        "rat_qtl",
+        "rat_term",
+        "rdo",
+        "rdo_xref",
+        "tdl_update_log",
+        "techdev_contact",
+        "techdev_info",
+        "tinx_articlerank",
+    ]
+    tables = [vals[0] for vals in mysqlserver.get_records(f"""
+        SELECT TABLE_NAME
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_TYPE='BASE TABLE'
+        and TABLE_SCHEMA='{copySchema}'
+    """) if vals[0] not in unusedTables and vals[0] not in etlTables]
+    return " ".join(tables)
+    # return "protein xref uberon t2tc target uberon_xref uberon_parent tdl_info ncats_dataSource_map ncats_dataSource info_type data_type"
+
 def createCopyTCRDDag(parent_dag_name, child_task_id, args):
+    mysqlserver = getMysqlConnector()
+    connection = mysqlserver.get_connection(schemaname)
     dag_subdag = DAG(
         dag_id=f'{parent_dag_name}.{child_task_id}',
         default_args=args,
@@ -45,14 +88,12 @@ def createCopyTCRDDag(parent_dag_name, child_task_id, args):
     )
 
     dump_file = getBaseDirectory() + 'tcrd-dump.sql'
-    tables = "protein goa tdl_info xref t2tc target info_type uberon data_type"
-    # tables = "protein goa"
 
     bash_dump = BashOperator(
         dag=dag_subdag,
         task_id='bash-dump-tcrd',
-        bash_command=f"""mysqldump --column-statistics=0 --set-gtid-purged=OFF -h{connection.host} \
-        -u{connection.login} -p"{connection.password}" --databases {copySchema} --tables {tables} > {dump_file}""",
+        bash_command=f"""mysqldump --single-transaction=TRUE --column-statistics=0 --set-gtid-purged=OFF -h{connection.host} \
+        -u{connection.login} -p"{connection.password}" --databases {copySchema} --tables {getTables()} > {dump_file}""",
     )
 
     bash_load = BashOperator(
