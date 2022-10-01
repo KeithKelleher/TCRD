@@ -15,7 +15,7 @@ from buildExpression import createExpressionDAG
 from airflow import DAG
 from airflow.utils.dates import days_ago
 
-DAG_NAME = 'rebuild-tcrd3'
+DAG_NAME = 'rebuild-tcrd4'
 copySchema = Variable.get('CopyTCRD')
 sqlFiles = getSqlFiles()
 schemaname = 'tcrdinfinity'
@@ -105,14 +105,15 @@ populateAncestryTable = SubDagOperator(
     subdag=createUberonAncestryDAG(DAG_NAME, pop_ancestry_task_id, dag.default_args)
 )
 
-copy_task_id = 'copy-old-tcrd'
-copyOldTCRD = SubDagOperator(
-    dag=dag,
-    task_id=copy_task_id,
-    subdag=createCopyTCRDDag(DAG_NAME, copy_task_id, dag.default_args)
-)
-
-copyOldTCRD >> createTables
+# turned off for now, because that step worked
+# copy_task_id = 'copy-old-tcrd'
+# copyOldTCRD = SubDagOperator(
+#     dag=dag,
+#     task_id=copy_task_id,
+#     subdag=createCopyTCRDDag(DAG_NAME, copy_task_id, dag.default_args)
+# )
+#
+# copyOldTCRD >> createTables
 
 gtexTasks = getDataSourceTasks(dag, 'GTEx', createGTExDAG, 'gtex')
 createTables >> gtexTasks['is_updated']

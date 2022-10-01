@@ -65,8 +65,6 @@ def createUberonAncestryDAG(parent_dag_name, child_task_id, args):
 
         mysqlserver.insert_many_rows('uberon_ancestry', inserts, target_fields=('uberon_id', 'ancestor_uberon_id'))
 
-
-
     populateAncestryTable = PythonOperator(
         dag=dag_subdag,
         task_id='populate-ancestry-table',

@@ -92,8 +92,7 @@ def createCopyTCRDDag(parent_dag_name, child_task_id, args):
     bash_dump = BashOperator(
         dag=dag_subdag,
         task_id='bash-dump-tcrd',
-        bash_command=f"""mysqldump --single-transaction=TRUE --column-statistics=0 --set-gtid-purged=OFF -h{connection.host} \
-        -u{connection.login} -p"{connection.password}" --databases {copySchema} --tables {getTables()} > {dump_file}""",
+        bash_command=f"""mysqldump --single-transaction=TRUE --column-statistics=0 --set-gtid-purged=OFF -h{connection.host} -u{connection.login} -p"{connection.password}" --databases {copySchema} --tables {getTables()} > {dump_file}""",
     )
 
     bash_load = BashOperator(

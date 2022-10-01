@@ -1,6 +1,8 @@
 from lxml import objectify
 from airflow.models import Variable
 
+import ETL.FullRebuild.models.keyword
+
 UP_HUMAN_FILE = './ETL/input_files/uniprot-short.xml'
 ECO_OBO_FILE = '../data/eco.obo'
 NS = '{http://uniprot.org/uniprot}'
@@ -125,7 +127,7 @@ def entry2target(entry, dataset_id, e2e):
                            'value': dbr.attrib['id']} )
     protein['goas'] = goas
     # Keywords
-    for kw in entry.keyword:
+    for kw in ETL.FullRebuild.models.keyword.keyword:
         xrefs.append( {'xtype': 'UniProt Keyword', 'dataset_id': dataset_id, 'value': kw.attrib['id'],
                        'xtra': kw} )
     protein['xrefs'] = xrefs
