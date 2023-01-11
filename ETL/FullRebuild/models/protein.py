@@ -31,7 +31,7 @@ class protein:
 
     @staticmethod
     def getFields():
-        return ('id', 'name', 'description', 'uniprot', 'sym', 'family', 'seq', 'preferred_symbol' )
+        return ('id', 'name', 'description', 'uniprot', 'sym', 'family', 'seq', 'preferred_symbol')
 
     @staticmethod
     def calculatePreferredSymbols(proteinList):
@@ -109,31 +109,34 @@ def findKeywords(proteinObj):
 
 def findAliases(proteinObj):
     aliases = []
-    aliases.append(alias('primary accession', proteinObj['primaryAccession']))
+    alias.appendToList(aliases, alias('primary accession', proteinObj['primaryAccession']))
     if 'secondaryAccessions' in proteinObj:
         for id in proteinObj['secondaryAccessions']:
-            aliases.append(alias('secondary accession', id))
-    aliases.append(alias('uniprot kb', proteinObj['uniProtkbId']))
-    aliases.append(alias('full name', proteinObj['proteinDescription']['recommendedName']['fullName']['value']))
+            alias.appendToList(aliases, alias('secondary accession', id))
+    alias.appendToList(aliases, alias('uniprot kb', proteinObj['uniProtkbId']))
+    alias.appendToList(aliases, alias('full name', proteinObj['proteinDescription']['recommendedName']['fullName']['value']))
     if 'shortNames' in proteinObj['proteinDescription']['recommendedName']:
         for obj in proteinObj['proteinDescription']['recommendedName']['shortNames']:
-            aliases.append(alias('short name', obj['value']))
+            alias.appendToList(aliases, alias('short name', obj['value']))
     if 'genes' in proteinObj and len(proteinObj['genes']) > 0:
         for gene in proteinObj['genes']:
             if 'geneName' in gene:
-                aliases.append(alias('symbol', gene['geneName']['value']))
+                alias.appendToList(aliases, alias('symbol', gene['geneName']['value']))
             if 'synonyms' in gene and len(gene['synonyms']) > 0:
                 for synonym in gene['synonyms']:
-                    aliases.append(alias('synonym', synonym['value']))
+                    alias.appendToList(aliases, alias('synonym', synonym['value']))
     ensemblObjs = common.findMatches(proteinObj, 'uniProtKBCrossReferences', 'database', 'Ensembl')
     for match in ensemblObjs:
-        aliases.append(alias('Ensembl', trimVersion(match['id'])))
+        alias.appendToList(aliases, alias('Ensembl', trimVersion(match['id'])))
         if 'properties' in match:
             for prop in match['properties']:
-                aliases.append(alias('Ensembl', trimVersion(prop['value'])))
+                alias.appendToList(aliases, alias('Ensembl', trimVersion(prop['value'])))
     stringObjs = common.findMatches(proteinObj, 'uniProtKBCrossReferences', 'database', 'STRING')
     for match in stringObjs:
-        aliases.append(alias('STRING', trimSpecies(match['id'])))
+        alias.appendToList(aliases, alias('STRING', trimSpecies(match['id'])))
+    refseqObjs = common.findMatches(proteinObj, 'uniProtKBCrossReferences', 'database', 'RefSeq')
+    for match in refseqObjs:
+        alias.appendToList(aliases, alias('RefSeq', trimVersion(match['id'])))
     return aliases
 
 def trimVersion(ensembl_id):

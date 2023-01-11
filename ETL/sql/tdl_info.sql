@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS `tdl_info` (
+        `id` int(11) NOT NULL AUTO_INCREMENT,
+        `itype` varchar(255) COLLATE utf8_unicode_ci NOT NULL,
+        `target_id` int(11) DEFAULT NULL,
+        `protein_id` int(11) DEFAULT NULL,
+        `nucleic_acid_id` int(11) DEFAULT NULL,
+        `string_value` text COLLATE utf8_unicode_ci,
+        `number_value` decimal(12,6) DEFAULT NULL,
+        `integer_value` int(11) DEFAULT NULL,
+        `date_value` date DEFAULT NULL,
+        `boolean_value` tinyint(1) DEFAULT NULL,
+        `curration_level` varchar(50) COLLATE utf8_unicode_ci DEFAULT NULL,
+        PRIMARY KEY (`id`),
+        KEY `tdl_info_idx1` (`itype`),
+        KEY `tdl_info_idx2` (`target_id`),
+        KEY `tdl_info_idx3` (`protein_id`),
+        FULLTEXT KEY `tdlinfo_text_idx` (`string_value`),
+        CONSTRAINT `fk_tdl_info__protein` FOREIGN KEY (`protein_id`) REFERENCES `protein` (`id`) ON DELETE CASCADE,
+        CONSTRAINT `fk_tdl_info__target` FOREIGN KEY (`target_id`) REFERENCES `target` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;

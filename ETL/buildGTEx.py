@@ -1,16 +1,22 @@
-from util import calculateOneTissueSpecificity, getENSGMap, getSqlFiles, getMysqlConnector, getFilteredSampleTissueMap, \
-    getFilteredSexMap, getConfigFile, saveTissueSpecificityToTDLInfo, calculateRanks, get_dataSource_inserts
+from util import calculateOneTissueSpecificity, getENSGMap, getFilteredSampleTissueMap, \
+    getFilteredSexMap, saveTissueSpecificityToTDLInfo, calculateRanks, get_dataSource_inserts
 from airflow import DAG
 from airflow.providers.mysql.operators.mysql import MySqlOperator
 from airflow.operators.python import PythonOperator
 import statistics
-import csv, os, sys
+import csv, os, sys, gzip
 import pendulum
 
-sqlFiles = getSqlFiles()
+sys.path += [ os.path.dirname(__file__) ]
+sys.path += [ os.path.dirname(__file__) + '/FullRebuild' ]
+
+from FullRebuild.models.common import common
+
+sqlFiles = common.getSqlFiles()
 testing = False  # just do some rows of the input file, set to False do the full ETL
 testCount = 750
-mysqlConnectorID = 'tcrdinfinity'
+schemaname = common.getNewDatabaseName()
+mysqlConnectorID = common.getGenericConnectionName()
 csv.field_size_limit(sys.maxsize)
 directory = os.path.dirname(__file__) + '/'
 
@@ -83,15 +89,15 @@ def formatUberon(dbValue):
     return "UBERON:" + dbValue
 
 def populateGtexTable():
-    mysqlserver = getMysqlConnector()
+    mysqlserver = common.getMysqlConnector()
     ensemblMap = getENSGMap()
     tissueMap = getFilteredSampleTissueMap()
     sexMap = getFilteredSexMap()
     tdlInserts = []
     inserts = []
     proteinLists = {}
-    dataFile = getConfigFile("GTEx", None, "data")
-    with open(dataFile) as file:
+    dataFile = common.getConfigFile("GTEx", None, "data")
+    with gzip.open(dataFile, 'rt') as file:
         next(file), next(file) # first two lines are not data
         tsv_file = csv.DictReader(file, delimiter="\t")
         count = 0
@@ -103,7 +109,7 @@ def populateGtexTable():
 
             maleTissueDict = {}
             femaleTissueDict = {}
-            protein_id = ensemblMap[ensg_id]
+            protein_ids = ensemblMap[ensg_id]
             for key in geneRow:
                 if (key != 'Description' and key != 'Name'):
                     subject_id = get_subject_id(key)
@@ -144,10 +150,13 @@ def populateGtexTable():
                 if median_tpm_female != None:
                     femaleMedians.append(median_tpm_female)
 
-                expressionDetails.append(fmt_expression_detail_obj(protein_id, tissue, median_tpm, median_tpm_male, median_tpm_female))
+                for protein_id in protein_ids:
+                    expressionDetails.append(fmt_expression_detail_obj(protein_id, tissue, median_tpm, median_tpm_male, median_tpm_female))
 
-            tdlInserts.extend(get_tdl_inserts(protein_id, allMedians, maleMedians, femaleMedians))
-            proteinLists[protein_id] = 1
+
+            for protein_id in protein_ids:
+                tdlInserts.extend(get_tdl_inserts(protein_id, allMedians, maleMedians, femaleMedians))
+                proteinLists[protein_id] = 1
             inserts.extend(add_ranks_and_format_inserts(allMedians, femaleMedians, maleMedians, expressionDetails))
 
             if (testing):
@@ -155,14 +164,14 @@ def populateGtexTable():
                 if (count >= testCount):
                     break
 
-    mysqlserver.insert_many_rows('gtex', inserts, target_fields=('protein_id', 'tissue', 'tpm', 'tpm_rank', 'tpm_male',
+    mysqlserver.insert_many_rows(f'{schemaname}.gtex', inserts, target_fields=('protein_id', 'tissue', 'tpm', 'tpm_rank', 'tpm_male',
                                                         'tpm_male_rank', 'tpm_female', 'tpm_female_rank', 'uberon_id'))
     dsInserts = get_dataSource_inserts(proteinLists, full)
-    mysqlserver.insert_rows('ncats_dataSource', [(full, gtexSources[full]['dataSourceDescription'], gtexSources[full]['url'], gtexSources[full]['license'], gtexSources[full]['licenseURL'], gtexSources[full]['citation'])],
+    mysqlserver.insert_rows(f'{schemaname}.ncats_dataSource', [(full, gtexSources[full]['dataSourceDescription'], gtexSources[full]['url'], gtexSources[full]['license'], gtexSources[full]['licenseURL'], gtexSources[full]['citation'])],
                             target_fields=('dataSource', 'dataSourceDescription', 'url', 'license', 'licenseURL', 'citation'))
-    mysqlserver.insert_many_rows('ncats_dataSource_map', dsInserts, target_fields=('dataSource', 'protein_id'))
+    mysqlserver.insert_many_rows(f'{schemaname}.ncats_dataSource_map', dsInserts, target_fields=('dataSource', 'protein_id'))
 
-    saveTissueSpecificityToTDLInfo(tdlInserts, [gtexSources[key]['tauString'] for key in gtexSources],  [gtexSources[key]['tauDescription'] for key in gtexSources])
+    saveTissueSpecificityToTDLInfo(tdlInserts)
 
 
 def add_ranks_and_format_inserts(allMedians, femaleMedians, maleMedians, protein_expression_detail_list):
@@ -211,7 +220,8 @@ def createGTExDAG(parent_dag_name, child_task_id, args):
                 DELETE FROM `tdl_info` WHERE itype in ('{gtexSources[full]['tauString']}','{gtexSources[male]['tauString']}','{gtexSources[female]['tauString']}');
                 DELETE FROM `ncats_dataSource_map` where dataSource = '{full}';
                 DELETE FROM `ncats_dataSource` where dataSource = '{full}';""",
-        mysql_conn_id=mysqlConnectorID
+        mysql_conn_id=mysqlConnectorID,
+        database=schemaname
     )
 
     # region Subject Table
@@ -219,14 +229,15 @@ def createGTExDAG(parent_dag_name, child_task_id, args):
         dag=dag_subdag,
         task_id='create-subject-table',
         sql=sqlFiles['gtex_subject.sql'],
-        mysql_conn_id=mysqlConnectorID
+        mysql_conn_id=mysqlConnectorID,
+        database=schemaname
     )
 
     populateSubjectTable = MySqlOperator(
         dag=dag_subdag,
         task_id='populate-subject-table',
         sql=f"""
-            LOAD DATA LOCAL INFILE '{getConfigFile("GTEx", None, "subject phenotypes")}'
+            LOAD DATA LOCAL INFILE '{common.getConfigFile("GTEx", None, "subject phenotypes")}'
             INTO TABLE gtex_subject
             FIELDS TERMINATED BY '\t'
             LINES TERMINATED BY '\n'
@@ -234,7 +245,8 @@ def createGTExDAG(parent_dag_name, child_task_id, args):
             (subject_id, sex, age, @vdeath_hardy)
             SET death_hardy = NULLIF(@vdeath_hardy, '');
         """,
-        mysql_conn_id=mysqlConnectorID
+        mysql_conn_id=mysqlConnectorID,
+        database=schemaname
     )
     # endregion
 
@@ -243,20 +255,22 @@ def createGTExDAG(parent_dag_name, child_task_id, args):
         dag=dag_subdag,
         task_id='create-sample-table',
         sql=sqlFiles['gtex_sample.sql'],
-        mysql_conn_id=mysqlConnectorID
+        mysql_conn_id=mysqlConnectorID,
+        database=schemaname
     )
 
     populateSampleTable =  MySqlOperator(
         dag=dag_subdag,
         task_id='populate-sample-table',
         sql=f"""
-            LOAD DATA LOCAL INFILE '{getConfigFile("GTEx", None, "sample attributes")}'
+            LOAD DATA LOCAL INFILE '{common.getConfigFile("GTEx", None, "sample attributes")}'
             INTO TABLE gtex_sample
             FIELDS TERMINATED BY '\t'
             LINES TERMINATED BY '\n'
             IGNORE 1 ROWS;
         """,
-        mysql_conn_id=mysqlConnectorID
+        mysql_conn_id=mysqlConnectorID,
+        database=schemaname
     )
     # endregion
 
@@ -265,7 +279,8 @@ def createGTExDAG(parent_dag_name, child_task_id, args):
         dag=dag_subdag,
         task_id='create-summary-table',
         sql=sqlFiles['gtex.sql'],
-        mysql_conn_id=mysqlConnectorID
+        mysql_conn_id=mysqlConnectorID,
+        database=schemaname
     )
     #endregion
 
@@ -280,7 +295,8 @@ def createGTExDAG(parent_dag_name, child_task_id, args):
         task_id='drop-temp-tables',
         sql=f"""DROP TABLE IF EXISTS `gtex_sample`;
                     DROP TABLE IF EXISTS `gtex_subject`;""",
-        mysql_conn_id=mysqlConnectorID
+        mysql_conn_id=mysqlConnectorID,
+        database=schemaname
     )
 
     dropAllTables >> [createSubjectTable, createSampleTable, createSummaryTable]
@@ -293,4 +309,4 @@ def createGTExDAG(parent_dag_name, child_task_id, args):
 
     return dag_subdag
 
-dag = createGTExDAG('standalone', 'rebuild-GTEx-tables', {"retries": 0})
+# dag = createGTExDAG('standalone', 'rebuild-GTEx-tables', {"retries": 0})

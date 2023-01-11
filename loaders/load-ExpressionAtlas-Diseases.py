@@ -42,7 +42,7 @@ LOGFILE = "%s/%s.log" % (LOGDIR, PROGRAM)
 # To generate the input file:
 # cd <TCRD ROOT>/data/ExpressionAtlas
 # wget ftp://ftp.ebi.ac.uk/pub/databases/microarray/data/atlas/experiments/atlas-latest-data.tar.gz
-# tar xf atlas-latest-data.tar.gz
+# tar xf atlas-latest.html-data.tar.gz
 # ./process.R
 INPUT_FILE = '../data/ExpressionAtlas/disease_assoc_human_do_uniq.tsv'
 

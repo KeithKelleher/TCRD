@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # Time-stamp: <2020-05-06 08:56:06 smathias>
-"""TCRD with latest NCBI Gene data via EUtils.
+"""TCRD with latest.html NCBI Gene data via EUtils.
 
 Usage:
     load-NCBIGene.py [--debug | --quiet] [--dbhost=<str>] [--dbname=<str>] [--logfile=<file>] [--loglevel=<int>] [--pastid=<int>]

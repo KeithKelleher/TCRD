@@ -346,7 +346,7 @@ def load_ExpressionAtlas(args, dba, logger, logfile):
   # To generate the input file:
   # cd <TCRD ROOT>/data/ExpressionAtlas
   # wget ftp://ftp.ebi.ac.uk/pub/databases/microarray/data/atlas/experiments/atlas-latest-data.tar.gz
-  # tar xf atlas-latest-data.tar.gz
+  # tar xf atlas-latest.html-data.tar.gz
   # ./process.R
   fn = CONFIG['Expression Atlas']['FILENAME']
   line_ct = slmf.wcl(fn)

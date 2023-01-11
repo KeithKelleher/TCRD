@@ -1,9 +1,14 @@
+import sys, os
 from datetime import datetime, timedelta
-from util import getSqlFiles, getMysqlConnector
 from airflow import DAG
 from airflow.models import Variable
 from airflow.operators.python import PythonOperator
-sqlFiles = getSqlFiles()
+
+sys.path += [ os.path.dirname(__file__) ]
+sys.path += [ os.path.dirname(__file__) + '/FullRebuild' ]
+from FullRebuild.models.common import common
+
+sqlFiles = common.getSqlFiles()
 
 # see if anything went wrong with the foreign keys when renaming everything
 # select *
@@ -16,8 +21,11 @@ def takeTCRDSnapshot():
     newName = Variable.get('NewTCRDName')
     oldName = 'tcrdinfinity'
 
-    mysqlserver = getMysqlConnector()
-    mysqlserver.run(f"""CREATE SCHEMA IF NOT EXISTS `{newName}`;""")
+    mysqlserver = common.getMysqlConnector()
+    mysqlserver.run(f"""
+        CREATE SCHEMA IF NOT EXISTS `{newName}`;
+        GRANT SELECT ON `{newName}`.* TO 'tcrd'@'%';
+        """)
     sqlString = sqlFiles['snapshot.sql'].replace('$1', oldName, 10).replace('$2', newName, 10)
     data = mysqlserver.get_records(sqlString)
     sqlCommand = ''.join(map(lambda x: x[0], data))

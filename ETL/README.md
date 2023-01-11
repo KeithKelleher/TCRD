@@ -6,3 +6,9 @@
   * create a connection called 'tcrdinfinity' using MySQL, and your connection settings (i.e. host, user, password, port)
   * create a variable calledd 'NewTCRDName' - the DAG called tcrd-snapshot will use that as the renamed tcrdinfinity
 * run some DAGs as appropriate - TODO - fill out with details on which DAGs exist
+
+
+
+
+Using the Docker image
+* you might have to increase memory in your Docker Dashboard (currently ours is set to 10GB)

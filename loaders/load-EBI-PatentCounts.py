@@ -42,7 +42,7 @@ LOGDIR = "./tcrd6logs"
 LOGFILE = "%s/%s.log" % (LOGDIR, PROGRAM)
 BASE_URL = 'ftp://ftp.ebi.ac.uk/pub/databases/chembl/IDG/patent_counts/'
 DOWNLOAD_DIR = '../data/EBI/patent_counts/'
-FILENAME = 'latest'
+FILENAME = 'latest.html'
 
 def download(args):
   if os.path.exists(DOWNLOAD_DIR + FILENAME):

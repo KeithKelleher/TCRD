@@ -1,18 +1,23 @@
-import csv
+import csv, sys, os
 import pendulum
+from airflow.models import Variable
 from airflow.providers.mysql.operators.mysql import MySqlOperator
 
-from util import getSqlFiles, getTissueMap, getConfigFile, lookupTissue, getENSGMap, getMysqlConnector, lookupENSG, \
+from util import getTissueMap, lookupTissue, getENSGMap, lookupENSG, \
     getHumanEntities, getRefSeqMap, calculateOneTissueSpecificity, saveTissueSpecificityToTDLInfo, \
     calculateRanks, getOntologyMap, getManualMap, get_dataSource_inserts
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
-sqlFiles = getSqlFiles()
-schemaname = 'tcrdinfinity'
-mysqlConnectorID = schemaname
+sys.path += [ os.path.dirname(__file__) ]
+sys.path += [ os.path.dirname(__file__) + '/FullRebuild' ]
+from FullRebuild.models.common import common
+
+sqlFiles = common.getSqlFiles()
+schemaname = common.getNewDatabaseName()
+mysqlConnectorID = common.getGenericConnectionName()
 testing = False  # just do some rows of the input file, set to False do the full ETL
-testCount = 7500
+testCount = 750
 
 def dataSourceStrings():
     currentSources = tuple(expressionSources.keys())
@@ -75,14 +80,16 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
     dropAllTables = MySqlOperator(
         dag=dag_subdag,
         task_id='drop-all-tables',
-        sql=f"""DROP TABLE IF EXISTS `expression_temp`;
+        sql=f"""
+        DROP TABLE IF EXISTS `expression_temp`;
         DROP TABLE IF EXISTS `expression`;
         DROP TABLE IF EXISTS `tissue`;
         DELETE FROM `tdl_info` WHERE itype in ({tauStrings()});
         DELETE FROM `ncats_dataSource` where dataSource in ({dataSourceStrings()});
         DELETE FROM `ncats_dataSource_map` where dataSource in ({dataSourceStrings()});
         """,
-        mysql_conn_id=mysqlConnectorID
+        mysql_conn_id=mysqlConnectorID,
+        database=schemaname
     )
     #endregion
 
@@ -90,7 +97,8 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
         dag=dag_subdag,
         task_id='create-expression-table',
         sql=sqlFiles['expression.sql'],
-        mysql_conn_id=mysqlConnectorID
+        mysql_conn_id=mysqlConnectorID,
+        database=schemaname
     )
 
     def add_ranks_and_format_inserts(proteinMap, etype):
@@ -111,45 +119,50 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
         else:
             proteinMap[protein_id] = [(expressionValue, extras)]
 
-    def doTDLinserts(itype, proteinMap, description):
+    def doTDLinserts(itype, proteinMap):
         inserts = []
         for protein_id in proteinMap:
             tau = calculateOneTissueSpecificity([translateQualValue(row[0]) for row in proteinMap[protein_id]])
             inserts.append((itype, protein_id, tau))
-        saveTissueSpecificityToTDLInfo(inserts, [itype], [description])
+        saveTissueSpecificityToTDLInfo(inserts)
 
     #region HPA RNA
     def doETLforHPARNA():
         dataSourceDetails = expressionSources[hpakey]
-        inputFile = getConfigFile("Expression", hpakey, "data")
-        mappingFile = getConfigFile("Expression", hpakey, "manual map")
+        inputFile = common.getConfigFile("Expression", hpakey, "data")
+        mappingFile = common.getConfigFile("Expression", hpakey, "manual map")
         tissueMap = getTissueMap(mappingFile)
         ensgMap = getENSGMap()
         count = 0
         proteinLists = {}
+        breaking = False
         with open(inputFile) as mapFile:
             next(mapFile)
             mapFile = csv.DictReader(mapFile, delimiter="\t", fieldnames=["Gene", "Gene name", "Tissue", "TPM", "pTPM", "nTPM"])
             for row in mapFile:
                 uberon_id = lookupTissue(tissueMap, row["Tissue"])
-                protein_id = lookupENSG(ensgMap, row["Gene"])
-                expressionValue = float(row["nTPM"])
-                if(protein_id is not None):
-                    addExpressionObject(proteinLists, protein_id, expressionValue, (row["Tissue"], uberon_id, row["Gene"], (expressionValue > 0)))
-                count = count + 1
-                if (testing and count >= testCount):
+                protein_ids = lookupENSG(ensgMap, row["Gene"])
+                for protein_id in protein_ids:
+                    expressionValue = float(row["nTPM"])
+                    if(protein_id is not None):
+                        addExpressionObject(proteinLists, protein_id, expressionValue, (row["Tissue"], uberon_id, row["Gene"], (expressionValue > 0)))
+                    count = count + 1
+                    if (testing and count >= testCount):
+                        break
+                        breaking = True
+                if breaking:
                     break
-        mysqlserver = getMysqlConnector()
+        mysqlserver = common.getMysqlConnector()
 
-        doTDLinserts(dataSourceDetails['tauString'], proteinLists, dataSourceDetails['tauDescription'])
+        doTDLinserts(dataSourceDetails['tauString'], proteinLists)
 
         dsInserts = get_dataSource_inserts(proteinLists, hpakey)
-        mysqlserver.insert_rows('ncats_dataSource', [(hpakey, dataSourceDetails['dataSourceDescription'], dataSourceDetails['url'], dataSourceDetails['license'], dataSourceDetails['licenseURL'], dataSourceDetails['citation'])],
+        mysqlserver.insert_rows(f'{schemaname}.ncats_dataSource', [(hpakey, dataSourceDetails['dataSourceDescription'], dataSourceDetails['url'], dataSourceDetails['license'], dataSourceDetails['licenseURL'], dataSourceDetails['citation'])],
                                 target_fields=('dataSource', 'dataSourceDescription', 'url', 'license', 'licenseURL', 'citation'))
-        mysqlserver.insert_many_rows('ncats_dataSource_map', dsInserts, target_fields=('dataSource', 'protein_id'))
+        mysqlserver.insert_many_rows(f'{schemaname}.ncats_dataSource_map', dsInserts, target_fields=('dataSource', 'protein_id'))
 
         inserts = add_ranks_and_format_inserts(proteinLists, hpakey)
-        mysqlserver.insert_many_rows('expression_temp', inserts, target_fields=('etype', 'protein_id', 'number_value', 'source_rank', 'tissue', 'uberon_id', 'source_id', 'expressed'))
+        mysqlserver.insert_many_rows(f'{schemaname}.expression_temp', inserts, target_fields=('etype', 'protein_id', 'number_value', 'source_rank', 'tissue', 'uberon_id', 'source_id', 'expressed'))
 
     etlHPARNA = PythonOperator(
         dag=dag_subdag,
@@ -171,8 +184,8 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
 
     def doETLforHPAProtein():
         dataSourceDetails = expressionSources[hpapkey]
-        inputFile = getConfigFile("Expression", hpapkey, "data")
-        mappingFile = getConfigFile("Expression", hpapkey, "manual map")
+        inputFile = common.getConfigFile("Expression", hpapkey, "data")
+        mappingFile = common.getConfigFile("Expression", hpapkey, "manual map")
         tissueMap = getTissueMap(mappingFile)
         ensgMap = getENSGMap()
         count = 0
@@ -186,33 +199,34 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
                 uberon_id = lookupTissue(tissueMap, tissueAndCell)
                 if uberon_id == None:
                     uberon_id = lookupTissue(tissueMap, row["Tissue"])
-                protein_id = lookupENSG(ensgMap, row["Gene"])
-                count = count + 1
-                if(protein_id is not None and row["Tissue"] != "N/A" and row["Reliability"] != "Uncertain" and row["Level"] != 'Not representative'):
-                    if row["Level"] in qualMap:
-                        addExpressionObject(proteinLists, protein_id, row["Level"], (tissueAndCell, row["Reliability"], uberon_id, row["Gene"], (row["Level"] != 'Not detected')))
-                    else:
-                        if row['Level'] in badQuals:
-                            badQuals[row['Level']] = badQuals[row['Level']] + 1
+                protein_ids = lookupENSG(ensgMap, row["Gene"])
+                for protein_id in protein_ids:
+                    count = count + 1
+                    if(protein_id is not None and row["Tissue"] != "N/A" and row["Reliability"] != "Uncertain" and row["Level"] != 'Not representative'):
+                        if row["Level"] in qualMap:
+                            addExpressionObject(proteinLists, protein_id, row["Level"], (tissueAndCell, row["Reliability"], uberon_id, row["Gene"], (row["Level"] != 'Not detected')))
                         else:
-                            badQuals[row['Level']] = 1
-                if (testing and count >= testCount):
-                    break
+                            if row['Level'] in badQuals:
+                                badQuals[row['Level']] = badQuals[row['Level']] + 1
+                            else:
+                                badQuals[row['Level']] = 1
+                    if (testing and count >= testCount):
+                        break
 
         print(f"Bad Qualitative Values for HPA Protein")
         print(badQuals)
 
-        mysqlserver = getMysqlConnector()
+        mysqlserver = common.getMysqlConnector()
 
-        doTDLinserts(dataSourceDetails['tauString'], proteinLists, dataSourceDetails['tauDescription'])
+        doTDLinserts(dataSourceDetails['tauString'], proteinLists)
 
         dsInserts = get_dataSource_inserts(proteinLists, hpapkey)
-        mysqlserver.insert_rows('ncats_dataSource', [(hpapkey, dataSourceDetails['dataSourceDescription'], dataSourceDetails['url'], dataSourceDetails['license'], dataSourceDetails['licenseURL'], dataSourceDetails['citation'])],
+        mysqlserver.insert_rows(f'{schemaname}.ncats_dataSource', [(hpapkey, dataSourceDetails['dataSourceDescription'], dataSourceDetails['url'], dataSourceDetails['license'], dataSourceDetails['licenseURL'], dataSourceDetails['citation'])],
                                 target_fields=('dataSource', 'dataSourceDescription', 'url', 'license', 'licenseURL', 'citation'))
-        mysqlserver.insert_many_rows('ncats_dataSource_map', dsInserts, target_fields=('dataSource', 'protein_id'))
+        mysqlserver.insert_many_rows(f'{schemaname}.ncats_dataSource_map', dsInserts, target_fields=('dataSource', 'protein_id'))
 
         inserts = add_ranks_and_format_inserts(proteinLists, hpapkey)
-        mysqlserver.insert_many_rows('expression_temp', inserts, target_fields=('etype', 'protein_id', 'qual_value', 'source_rank', 'tissue', 'evidence', 'uberon_id', 'source_id', 'expressed'))
+        mysqlserver.insert_many_rows(f'{schemaname}.expression_temp', inserts, target_fields=('etype', 'protein_id', 'qual_value', 'source_rank', 'tissue', 'evidence', 'uberon_id', 'source_id', 'expressed'))
 
     etlHPAProtein = PythonOperator(
         dag=dag_subdag,
@@ -225,9 +239,9 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
 
     def doETLforJensenLab(ti):
         dataSourceDetails = expressionSources[jensenlabkey]
-        inputFile = getConfigFile("Expression", jensenlabkey, "data")
-        mappingFile = getConfigFile("Expression", jensenlabkey, "manual map")
-        humanEntityFile = getConfigFile("Expression", jensenlabkey, "human entities")
+        inputFile = common.getConfigFile("Expression", jensenlabkey, "data")
+        mappingFile = common.getConfigFile("Expression", jensenlabkey, "manual map")
+        humanEntityFile = common.getConfigFile("Expression", jensenlabkey, "human entities")
 
         ontologyMap = getOntologyMap()
         tissueMap = getManualMap(mappingFile)
@@ -241,8 +255,8 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
             mapFile = csv.DictReader(mapFile, delimiter="\t", fieldnames=["gene_id", "sym", "ontology_id", "tissue", "confidence"])
             for row in mapFile:
                 if (row["gene_id"] in humanEntityMap):
-                    protein_id = lookupENSG(ensgMap, row["gene_id"])
-                    if protein_id is not None:
+                    protein_ids = lookupENSG(ensgMap, row["gene_id"])
+                    for protein_id in protein_ids:
                         proteinLists[protein_id] = 1
                         uberon_id = lookupTissue(tissueMap,row["ontology_id"])
                         if uberon_id is None:
@@ -258,14 +272,14 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
                             if (testing and count >= testCount):
                                 break
 
-        mysqlserver = getMysqlConnector()
+        mysqlserver = common.getMysqlConnector()
 
         dsInserts = get_dataSource_inserts(proteinLists, jensenlabkey)
-        mysqlserver.insert_rows('ncats_dataSource', [(jensenlabkey, dataSourceDetails['dataSourceDescription'], dataSourceDetails['url'], dataSourceDetails['license'], dataSourceDetails['licenseURL'], dataSourceDetails['citation'])],
+        mysqlserver.insert_rows(f'{schemaname}.ncats_dataSource', [(jensenlabkey, dataSourceDetails['dataSourceDescription'], dataSourceDetails['url'], dataSourceDetails['license'], dataSourceDetails['licenseURL'], dataSourceDetails['citation'])],
                                 target_fields=('dataSource', 'dataSourceDescription', 'url', 'license', 'licenseURL', 'citation'))
-        mysqlserver.insert_many_rows('ncats_dataSource_map', dsInserts, target_fields=('dataSource', 'protein_id'))
+        mysqlserver.insert_many_rows(f'{schemaname}.ncats_dataSource_map', dsInserts, target_fields=('dataSource', 'protein_id'))
 
-        mysqlserver.insert_many_rows('expression_temp', inserts, target_fields=('etype', 'protein_id', 'tissue', 'number_value', 'oid', 'uberon_id', 'source_id', 'expressed'))
+        mysqlserver.insert_many_rows(f'{schemaname}.expression_temp', inserts, target_fields=('etype', 'protein_id', 'tissue', 'number_value', 'oid', 'uberon_id', 'source_id', 'expressed'))
 
 
     etlJensenLabIntegrated = PythonOperator(
@@ -279,8 +293,8 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
     #region HPM
     def doETLforHPM():
         dataSourceDetails = expressionSources[hpmkey]
-        inputFile = getConfigFile("Expression", hpmkey, "data")
-        mappingFile = getConfigFile("Expression", hpmkey, "manual map")
+        inputFile = common.getConfigFile("Expression", hpmkey, "data")
+        mappingFile = common.getConfigFile("Expression", hpmkey, "manual map")
         tissueMap = getTissueMap(mappingFile)
         refseqMap = getRefSeqMap()
         count = 0
@@ -288,16 +302,20 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
         proteinLists = {}
         breaking = False
         with open(inputFile) as dataFile:
-            dataFile = csv.DictReader(dataFile, delimiter=",")
-            for row in dataFile:
+            dataDict = csv.DictReader(dataFile, delimiter=",")
+            for row in dataDict:
                 refseq_id = row["RefSeq Accession"].split('.')[0]
                 if refseq_id in refseqMap:
                     protein_ids = refseqMap[refseq_id]
+                    print(refseq_id)
+                    print(protein_ids)
                     protein_ids = [p for p in protein_ids if p not in done_list]
                     done_list.extend(protein_ids)
                     for tissue in row:
                         if tissue != 'Accession' and tissue != 'RefSeq Accession':
                             uberon_id = lookupTissue(tissueMap, tissue)
+                            print(tissue)
+                            print(uberon_id)
                             expressionValue = float(row[tissue])
                             for protein_id in protein_ids:
                                 addExpressionObject(proteinLists, protein_id, expressionValue, (tissue, uberon_id, row["RefSeq Accession"], (expressionValue > 0)))
@@ -308,17 +326,17 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
                 if breaking:
                     break
 
-        mysqlserver = getMysqlConnector()
+        mysqlserver = common.getMysqlConnector()
 
-        doTDLinserts(dataSourceDetails['tauString'], proteinLists, dataSourceDetails['tauDescription'])
+        doTDLinserts(dataSourceDetails['tauString'], proteinLists)
 
         dsInserts = get_dataSource_inserts(proteinLists, hpmkey)
-        mysqlserver.insert_rows('ncats_dataSource', [(hpmkey, dataSourceDetails['dataSourceDescription'], dataSourceDetails['url'], dataSourceDetails['license'], dataSourceDetails['licenseURL'], dataSourceDetails['citation'])],
+        mysqlserver.insert_rows(f'{schemaname}.ncats_dataSource', [(hpmkey, dataSourceDetails['dataSourceDescription'], dataSourceDetails['url'], dataSourceDetails['license'], dataSourceDetails['licenseURL'], dataSourceDetails['citation'])],
                                 target_fields=('dataSource', 'dataSourceDescription', 'url', 'license', 'licenseURL', 'citation'))
-        mysqlserver.insert_many_rows('ncats_dataSource_map', dsInserts, target_fields=('dataSource', 'protein_id'))
+        mysqlserver.insert_many_rows(f'{schemaname}.ncats_dataSource_map', dsInserts, target_fields=('dataSource', 'protein_id'))
 
         inserts = add_ranks_and_format_inserts(proteinLists, hpmkey)
-        mysqlserver.insert_many_rows('expression_temp', inserts, target_fields=('etype', 'protein_id', 'number_value', 'source_rank', 'tissue', 'uberon_id', 'source_id', 'expressed'))
+        mysqlserver.insert_many_rows(f'{schemaname}.expression_temp', inserts, target_fields=('etype', 'protein_id', 'number_value', 'source_rank', 'tissue', 'uberon_id', 'source_id', 'expressed'))
 
     etlHPMProtein = PythonOperator(
         dag=dag_subdag,
@@ -331,12 +349,13 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
         dag=dag_subdag,
         task_id='create-tissue-table',
         sql=sqlFiles['tissue.sql'],
-        mysql_conn_id=mysqlConnectorID
+        mysql_conn_id=mysqlConnectorID,
+        database=schemaname
     )
 
     def updateDiscreteTissue():
-        mysqlserver = getMysqlConnector()
-        allexpressions = mysqlserver.get_records("""SELECT * from expression_temp""")
+        mysqlserver = common.getMysqlConnector()
+        allexpressions = mysqlserver.get_records(f"""SELECT * from {schemaname}.expression_temp""")
         tissueMap = {}
         index = 1
         inserts = []
@@ -349,9 +368,9 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
                 tissueMap[tissue.lower()] = (tissue, index)
                 index = index + 1
             inserts.append(row + (tissue_id,))
-        mysqlserver.insert_many_rows('tissue', [(tissueMap[key][1], tissueMap[key][0]) for key in tissueMap], target_fields=('id', 'name'))
-        mysqlserver.insert_many_rows('expression', inserts, target_fields=('id', 'etype', 'protein_id', 'source_id', 'tissue', 'qual_value', 'number_value', 'expressed', 'source_rank', 'evidence', 'oid', 'uberon_id', 'tissue_id'))
-        mysqlserver.run("DROP TABLE `expression_temp`")
+        mysqlserver.insert_many_rows(f'{schemaname}.tissue', [(tissueMap[key][1], tissueMap[key][0]) for key in tissueMap], target_fields=('id', 'name'))
+        mysqlserver.insert_many_rows(f'{schemaname}.expression', inserts, target_fields=('id', 'etype', 'protein_id', 'source_id', 'tissue', 'qual_value', 'number_value', 'expressed', 'source_rank', 'evidence', 'oid', 'uberon_id', 'tissue_id'))
+        mysqlserver.run(f"DROP TABLE {schemaname}.`expression_temp`")
 
     updateTissueTable = PythonOperator(
         dag=dag_subdag,
@@ -365,4 +384,4 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
 
     return dag_subdag
 
-dag = createExpressionDAG('standalone', 'rebuild-Expression-tables', {"retries": 0})
+# dag = createExpressionDAG('standalone', 'rebuild-Expression-tables', {"retries": 0})

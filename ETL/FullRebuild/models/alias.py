@@ -12,3 +12,9 @@ class alias:
     @staticmethod
     def getFields():
         return ('protein_id', 'type', 'value')
+
+    @staticmethod
+    def appendToList(array, newAlias):
+        found = list(filter(lambda each: newAlias.type == each.type and newAlias.term == each.term, array))
+        if(len(found) == 0):
+            array.append(newAlias)
