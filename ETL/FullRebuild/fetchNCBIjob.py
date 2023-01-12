@@ -36,7 +36,7 @@ def fetchNCBIData():
         queue.addJob("GetIDs", uniprot[0])
 
     while(queue.runOneJob()):
-        time.sleep(0.35)
+        time.sleep(0.5)
 
     geneIDinserts, generifInserts, protein2pubmedInserts, generif2pubmedInserts = queue.getInserts()
 
