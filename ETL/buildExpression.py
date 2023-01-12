@@ -12,6 +12,7 @@ from airflow.operators.python import PythonOperator
 sys.path += [ os.path.dirname(__file__) ]
 sys.path += [ os.path.dirname(__file__) + '/FullRebuild' ]
 from FullRebuild.models.common import common
+from FullRebuild.util import getDropFKTask
 
 sqlFiles = common.getSqlFiles()
 schemaname = common.getNewDatabaseName()
@@ -378,7 +379,9 @@ def createExpressionDAG(parent_dag_name, child_task_id, args):
         python_callable=updateDiscreteTissue
     )
 
-    dropAllTables >> createTissueTable >> createExpressionTables
+    removeInfoTypeFK = getDropFKTask(dag_subdag, schemaname, mysqlConnectorID, 'tdl_info', 'fk_tdl_info__info_type')
+
+    [dropAllTables, removeInfoTypeFK] >> createTissueTable >> createExpressionTables
     createExpressionTables >> [etlHPARNA, etlHPAProtein, etlJensenLabIntegrated, etlHPMProtein] >> updateTissueTable
     createTissueTable >> updateTissueTable
 

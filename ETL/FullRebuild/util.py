@@ -8,6 +8,7 @@ import numpy as np
 from airflow.models import Variable
 from airflow.providers.http.hooks.http import HttpHook
 from airflow.providers.mysql.hooks.mysql import MySqlHook
+from airflow.providers.mysql.operators.mysql import MySqlOperator
 
 sys.path += [ os.path.dirname(__file__) ]
 sys.path += [ os.path.dirname(__file__) + '/FullRebuild' ]
@@ -204,3 +205,34 @@ def get_dataSource_inserts(proteinMap, dsKey):
     for protein_id in proteinMap:
         inserts.append((dsKey, protein_id))
     return inserts
+
+def getDropFKTask(dag, schemaname, mysqlConnectorID, tablename, foreignKeyName):
+    return MySqlOperator(
+        dag=dag,
+        task_id=f'remove-fk-{foreignKeyName}', # input_version keeps track of the data source now
+        sql=f"""
+            -- DROP FOREIGN KEY IF EXISTS
+            SELECT
+                COUNT(*)
+            INTO
+                @FOREIGN_KEY_my_foreign_key_ON_TABLE_my_table_EXISTS
+            FROM
+                `information_schema`.`table_constraints`
+            WHERE
+                `table_schema` = '{schemaname}'
+                AND `table_name` = '{tablename}'
+                AND `constraint_name` = '{foreignKeyName}'
+                AND `constraint_type` = 'FOREIGN KEY'
+            ;
+            SET @statement := IF(
+                @FOREIGN_KEY_my_foreign_key_ON_TABLE_my_table_EXISTS > 0,
+                -- 'SELECT "info: foreign key exists."',
+                'ALTER TABLE {tablename} DROP FOREIGN KEY {foreignKeyName}',
+                'SELECT "info: foreign key does not exist."'
+            );
+            PREPARE statement FROM @statement;
+            EXECUTE statement;
+            """,
+        mysql_conn_id=mysqlConnectorID,
+        database=schemaname
+    )

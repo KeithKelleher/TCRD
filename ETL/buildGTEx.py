@@ -173,6 +173,28 @@ def populateGtexTable():
 
     saveTissueSpecificityToTDLInfo(tdlInserts)
 
+def popSampTable():
+    mysqlserver = common.getMysqlConnector()
+    inputFile = common.getConfigFile("GTEx", None, "sample attributes")
+    inserts = []
+    with open(inputFile) as dataFile:
+        dataDict = csv.DictReader(dataFile, delimiter="\t")
+        for row in dataDict:
+            inserts.append((row['SAMPID'], row['SMTSD'], row['SMUBRID'], row['SMATSSCR']))
+    mysqlserver.insert_many_rows(f'{schemaname}.gtex_sample', inserts, target_fields=('SAMPID', 'SMTSD', 'SMUBRID', 'SMATSSCR'))
+    return
+
+def popSubTable():
+    mysqlserver = common.getMysqlConnector()
+    inputFile = common.getConfigFile("GTEx", None, "subject phenotypes")
+    inserts = []
+    with open(inputFile) as dataFile:
+        dataDict = csv.DictReader(dataFile, delimiter="\t")
+        for row in dataDict:
+
+            inserts.append((row['SUBJID'], row['SEX'], row['AGE'], row['DTHHRDY'] if len(row['DTHHRDY'])>0 else None))
+    mysqlserver.insert_many_rows(f'{schemaname}.gtex_subject', inserts, target_fields=('subject_id', 'sex', 'age', 'death_hardy'))
+    return
 
 def add_ranks_and_format_inserts(allMedians, femaleMedians, maleMedians, protein_expression_detail_list):
     inserts = []
@@ -233,20 +255,16 @@ def createGTExDAG(parent_dag_name, child_task_id, args):
         database=schemaname
     )
 
-    populateSubjectTable = MySqlOperator(
+    populateSubjectTable = PythonOperator(
         dag=dag_subdag,
         task_id='populate-subject-table',
-        sql=f"""
-            LOAD DATA LOCAL INFILE '{common.getConfigFile("GTEx", None, "subject phenotypes")}'
-            INTO TABLE gtex_subject
-            FIELDS TERMINATED BY '\t'
-            LINES TERMINATED BY '\n'
-            IGNORE 1 ROWS
-            (subject_id, sex, age, @vdeath_hardy)
-            SET death_hardy = NULLIF(@vdeath_hardy, '');
-        """,
-        mysql_conn_id=mysqlConnectorID,
-        database=schemaname
+        python_callable=popSubTable
+    )
+
+    populateSampleTable = PythonOperator(
+        dag=dag_subdag,
+        task_id='populate-sample-table',
+        python_callable=popSampTable
     )
     # endregion
 
@@ -259,19 +277,6 @@ def createGTExDAG(parent_dag_name, child_task_id, args):
         database=schemaname
     )
 
-    populateSampleTable =  MySqlOperator(
-        dag=dag_subdag,
-        task_id='populate-sample-table',
-        sql=f"""
-            LOAD DATA LOCAL INFILE '{common.getConfigFile("GTEx", None, "sample attributes")}'
-            INTO TABLE gtex_sample
-            FIELDS TERMINATED BY '\t'
-            LINES TERMINATED BY '\n'
-            IGNORE 1 ROWS;
-        """,
-        mysql_conn_id=mysqlConnectorID,
-        database=schemaname
-    )
     # endregion
 
     #region GTEx Summary Table
