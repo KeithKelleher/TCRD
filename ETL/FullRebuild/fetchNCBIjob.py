@@ -77,6 +77,36 @@ with DAG(
         database=schemaname
     )
 
+    removeAliasFK = MySqlOperator(
+        dag=dag,
+        task_id='remove-alias-dataset-fk', # input_version keeps track of the data source now
+        sql=f"""
+            -- DROP FOREIGN KEY IF EXISTS
+            SELECT
+                COUNT(*)
+            INTO
+                @FOREIGN_KEY_my_foreign_key_ON_TABLE_my_table_EXISTS
+            FROM
+                `information_schema`.`table_constraints`
+            WHERE
+                `table_schema` = '{schemaname}'
+                AND `table_name` = 'alias'
+                AND `constraint_name` = 'fk_alias_dataset'
+                AND `constraint_type` = 'FOREIGN KEY'
+            ;
+            SET @statement := IF(
+                @FOREIGN_KEY_my_foreign_key_ON_TABLE_my_table_EXISTS > 0,
+                -- 'SELECT "info: foreign key exists."',
+                'ALTER TABLE alias DROP FOREIGN KEY fk_alias_dataset',
+                'SELECT "info: foreign key does not exist."'
+            );
+            PREPARE statement FROM @statement;
+            EXECUTE statement;
+            """,
+        mysql_conn_id=mysqlConnectorID,
+        database=schemaname
+    )
+
     createTables = MySqlOperator(
         dag=dag,
         task_id='create-tables',
@@ -116,5 +146,5 @@ with DAG(
                  None, None, formatted_fetch_time)
     )
 
-    clearOldData >> \
+    clearOldData >> removeAliasFK >> \
     createTables >> fetchGeneIDs >> [saveGeneIDMetadata, saveGeneRIFmetadata, savePubListMetadata]
