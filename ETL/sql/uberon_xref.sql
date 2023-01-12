@@ -1,5 +1,5 @@
 CREATE TABLE `uberon_xref` (
-       `uid` varchar(20) COLLATE utf8_unicode_ci NOT NULL,
+       `uid` varchar(30) COLLATE utf8_unicode_ci NOT NULL,
        `db` varchar(24) COLLATE utf8_unicode_ci NOT NULL,
        `value` varchar(255) COLLATE utf8_unicode_ci NOT NULL,
        PRIMARY KEY (`uid`,`db`,`value`),

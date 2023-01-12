@@ -1,5 +1,5 @@
 CREATE TABLE `uberon` (
-      `uid` varchar(20) COLLATE utf8_unicode_ci NOT NULL,
+      `uid` varchar(30) COLLATE utf8_unicode_ci NOT NULL,
       `name` text COLLATE utf8_unicode_ci NOT NULL,
       `def` text COLLATE utf8_unicode_ci,
       `comment` text COLLATE utf8_unicode_ci,
