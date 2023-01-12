@@ -86,13 +86,14 @@ with DAG(
         database=schemaname
     )
 
-    saveTinXMetadata = PythonOperator(
-        dag=dag,
-        task_id='save-tinx-metadata',
-        python_callable=common.saveFetchMetadata,
-        op_args=("TinX", "TinX", "Tin-X Associations",
-                 None, None, None, formatted_fetch_time)
-    )
+    # saveTinXMetadata = PythonOperator(
+    #     dag=dag,
+    #     task_id='save-tinx-metadata',
+    #     python_callable=common.saveFetchMetadata,
+    #     op_args=("TinX", "TinX", "Tin-X Associations",
+    #              None, None, None, formatted_fetch_time)
+    # )
 
-    [dropTables, bash_dump] >> bash_load >> add_indexes
+    [dropTables, bash_dump] >> bash_load >> add_indexes \
+    # >> saveTinXMetadata
     # bash_load >> saveTinXMetadata ## since the data we use isn't updated yet, let's figure out another way to determine the version
