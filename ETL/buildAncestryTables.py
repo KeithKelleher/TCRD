@@ -13,7 +13,6 @@ sqlFiles = common.getSqlFiles()
 schemaname = common.getNewDatabaseName()
 mysqlConnectorID = common.getGenericConnectionName()
 
-
 def createAncestryTablesDAG(parent_dag_name, child_task_id, args):
     dag_subdag = DAG(
         dag_id=f'{parent_dag_name}.{child_task_id}',
@@ -144,4 +143,4 @@ def populateTable(**kwargs):
 
     mysqlserver.insert_many_rows(f'{schemaname}.ancestry_{ontology["table"]}', inserts, target_fields=('oid', 'ancestor_id'))
 
-# dag = createAncestryTablesDAG('standalone', 'create-ancestry-tables', {"retries": 0})
+dag = createAncestryTablesDAG('standalone', 'create-ancestry-tables', {"retries": 0})
