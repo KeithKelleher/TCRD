@@ -7,7 +7,6 @@ from airflow import DAG
 import pendulum
 
 copyDB = Variable.get('CopyDB')
-newDB = Variable.get('NewDB')
 
 from FullRebuild.models.common import common
 sqlFiles = common.getSqlFiles()
@@ -43,7 +42,7 @@ def getTables():
     """) if vals[0] not in unusedTables and vals[0] not in etlTables]
     return " ".join(tables)
 
-def createCopyTCRDDag(child_task_id, args):
+def createDumpDBDag(child_task_id, args):
     connection = mysqlserver.get_connection(mysqlConnectorID)
     dag = DAG(
         dag_id=f'{child_task_id}',
@@ -63,32 +62,7 @@ def createCopyTCRDDag(child_task_id, args):
                      f'-p"{connection.password}" --databases {copyDB} '
                      f'--tables {getTables()} > {dump_file}',
     )
-    bash_load = BashOperator(
-        dag=dag,
-        task_id='bash-load-database',
-        bash_command=f'mysql -h{connection.host} -u{connection.login} '
-                     f'-p"{connection.password}" {newDB} < {dump_file}'
-    )
-    truncateSchema = MySqlOperator(
-        dag=dag,
-        task_id='start-fresh',
-        sql=f"""DROP SCHEMA IF EXISTS `{newDB}`;
-                CREATE SCHEMA `{newDB}`;
-                GRANT SELECT ON `{newDB}`.* TO 'tcrd'@'%';""",
-        mysql_conn_id=mysqlConnectorID
-    )
 
-    createTables = MySqlOperator(
-        dag=dag,
-        task_id='create-tables',
-        sql=sqlFiles['input_version.sql'],
-        mysql_conn_id=mysqlConnectorID,
-        database=newDB
-    )
-
-    truncateSchema >> createTables
-    truncateSchema >> bash_load
-    bash_dump >> bash_load
     return dag
 
-dag = createCopyTCRDDag('2b-copy-database', {"retries": 0})
+dag = createDumpDBDag('2b-dump-copyDB', {"retries": 0})
