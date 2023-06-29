@@ -104,7 +104,8 @@ def getParents(uberon, tree, node, list, branches):
     parents = [row[1] for row in tree if row[0] == node]
     parentObjects = [row for row in uberon if row[0] in parents]
     for p in parentObjects:
-        getParents(uberon, tree, p[0], [r for r in list], branches)
+        if (p[0] not in list) :
+            getParents(uberon, tree, p[0], [r for r in list], branches)
     if len(parentObjects) == 0:
         branches.append(list)
 
