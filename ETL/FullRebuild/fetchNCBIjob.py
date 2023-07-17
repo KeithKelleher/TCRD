@@ -27,24 +27,28 @@ def fetchNCBIData():
     databaseName = common.getNewDatabaseName()
     if testing:
         uniprotIDs = mysqlserver.get_records(
-            f"select uniprot from {databaseName}.protein where id not in (select distinct protein_id from {databaseName}.alias where type = 'NCBI Gene ID') limit 100")
+            f"select 'P0DI83' union select uniprot from {databaseName}.protein where id not in (select distinct protein_id from {databaseName}.alias where type = 'NCBI Gene ID') limit 50")
     else:
         uniprotIDs = mysqlserver.get_records(
             f"select uniprot from {databaseName}.protein where id not in (select distinct protein_id from {databaseName}.alias where type = 'NCBI Gene ID')")
 
-    queue = NcbiQueue()
-    for uniprot in uniprotIDs:
-        queue.addJob("GetIDs", uniprot[0])
+    if testing:
+        chunk_size = 5
+    else:
+        chunk_size = 2000
+    chunks = [uniprotIDs[i:i + chunk_size] for i in range(0, len(uniprotIDs), chunk_size)]
 
-    while(queue.runOneJob()):
-        time.sleep(0.5)
+    for chunk in chunks:
+        queue = NcbiQueue()
+        for uniprot in chunk:
+            queue.addJob("GetIDs", uniprot[0])
 
-    geneIDinserts, generifInserts, protein2pubmedInserts, generif2pubmedInserts = queue.getInserts()
+        while(queue.runOneJob()):
+            time.sleep(0.5)
 
-    mysqlserver.insert_many_rows(f'{schemaname}.generif', generifInserts, target_fields=('id', 'protein_id', 'gene_id', 'text', 'date'))
-    mysqlserver.insert_many_rows(f'{schemaname}.protein2pubmed', protein2pubmedInserts, target_fields=('protein_id','pubmed_id', 'gene_id', 'source'))
-    mysqlserver.insert_many_rows(f'{schemaname}.generif2pubmed', generif2pubmedInserts, target_fields=('generif_id','pubmed_id'))
-    mysqlserver.insert_many_rows(f'{schemaname}.alias', geneIDinserts, target_fields=('type','protein_id', 'value'))
+        geneIDinserts, generifInserts, protein2pubmedInserts, generif2pubmedInserts = queue.getInserts()
+        queue.doInserts(generifInserts, protein2pubmedInserts, generif2pubmedInserts, geneIDinserts)
+
 
 
 with DAG(

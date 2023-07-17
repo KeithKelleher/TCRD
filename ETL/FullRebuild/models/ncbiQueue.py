@@ -96,6 +96,12 @@ class NcbiQueue:
 
         return (geneIDinserts, generifInserts, protein2pubmedInserts, generif2pubmedInserts)
 
+    def doInserts(self, generifInserts, protein2pubmedInserts, generif2pubmedInserts, geneIDinserts):
+        mysqlserver.insert_many_rows(f'{databaseName}.generif', generifInserts, target_fields=('id', 'protein_id', 'gene_id', 'text', 'date'))
+        mysqlserver.insert_many_rows(f'{databaseName}.protein2pubmed', protein2pubmedInserts, target_fields=('protein_id','pubmed_id', 'gene_id', 'source'))
+        mysqlserver.insert_many_rows(f'{databaseName}.generif2pubmed', generif2pubmedInserts, target_fields=('generif_id','pubmed_id'))
+        mysqlserver.insert_many_rows(f'{databaseName}.alias', geneIDinserts, target_fields=('type','protein_id', 'value'))
+
 class NcbiJob:
     def __init__(self, type, arguments):
         self.type = type
@@ -125,7 +131,7 @@ class NcbiJob:
         self.attempts += 1
         try:
             if (self.type == 'GetIDs'):
-                ids = fetchGeneIDs(self.arguments, 'accession')
+                ids = fetchGeneIDs(self.arguments, 'primaryAccession')
                 self.results = ids
                 if ids is not None and len(ids) > 0:
                     queue.addJob('GetDetails', {'ids': ",".join(ids), 'accession': self.arguments})
