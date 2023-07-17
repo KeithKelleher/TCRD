@@ -131,7 +131,7 @@ class NcbiJob:
         self.attempts += 1
         try:
             if (self.type == 'GetIDs'):
-                ids = fetchGeneIDs(self.arguments, 'primaryAccession')
+                ids = fetchGeneIDs(self.arguments, 'accession')
                 self.results = ids
                 if ids is not None and len(ids) > 0:
                     queue.addJob('GetDetails', {'ids': ",".join(ids), 'accession': self.arguments})
