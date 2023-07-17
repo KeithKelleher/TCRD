@@ -35,7 +35,7 @@ def fetchNCBIData():
     if testing:
         chunk_size = 5
     else:
-        chunk_size = 2000
+        chunk_size = 500
     chunks = [uniprotIDs[i:i + chunk_size] for i in range(0, len(uniprotIDs), chunk_size)]
 
     for chunk in chunks:
