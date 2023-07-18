@@ -14,6 +14,7 @@ geneGOpubSelector = "Entrezgene_properties/Gene-commentary/Gene-commentary_comme
 genePubSelector = "Entrezgene_comments/Gene-commentary/Gene-commentary_refs/Pub/Pub_pmid/PubMedId"
 geneGenerifSelector = "Entrezgene_comments/Gene-commentary/Gene-commentary_type[@value='generif']/.."
 rifTextSelector = "Gene-commentary_text"
+subrifSelector = "Gene-commentary_comment/Gene-commentary"
 rifRefSelector = "Gene-commentary_refs/Pub/Pub_pmid/PubMedId"
 rifInteractionNodeSelector = "Gene-commentary_heading"
 rifCreateDateSelector = 'Gene-commentary_create-date/Date/Date_std/Date-std'
@@ -205,8 +206,13 @@ def fetchGeneDetails(geneList):
             if (interactionNode is not None and interactionNode.text == 'Interactions'):
                 continue
             rifText = rif.find(rifTextSelector)
-            rifDate = fetchLastModDate(rif)
-            for ref in rif.findall(rifRefSelector):
+            if rifText is not None:
+                activeRif = rif
+            else:
+                activeRif = rif.find(subrifSelector)
+                rifText = activeRif.find(rifTextSelector)
+            rifDate = fetchLastModDate(activeRif)
+            for ref in activeRif.findall(rifRefSelector):
                 appendPub(results[geneid]['pmids'], ref.text, rifText.text, rifDate)
     return results
 
@@ -251,7 +257,7 @@ if __name__ == '__main__':
     # queue.addJob("GetDetails", {'ids': '100507462', 'accession': 'A0A096LPI5'}) # failed from the thing
 
     while(queue.runOneJob()):
-        time.sleep(0.35)
+        time.sleep(0.5)
 
     geneIDinserts, generifInserts, protein2pubmedInserts, generif2pubmedInserts = queue.getInserts()
 

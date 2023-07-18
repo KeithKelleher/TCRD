@@ -18,7 +18,7 @@ sqlFiles = common.getSqlFiles()
 schemaname = common.getNewDatabaseName()
 mysqlConnectorID = common.getGenericConnectionName()
 
-testing = False
+testing = True
 fetch_time = datetime.now()
 formatted_fetch_time = fetch_time.strftime('%Y-%m-%d %H:%M:%S')
 
@@ -82,6 +82,17 @@ with DAG(
         database=schemaname
     )
 
+    addNCBIAliasType = MySqlOperator(
+        dag=dag,
+        task_id='add-alias-type',
+        sql=f"""
+            ALTER TABLE `alias` 
+            CHANGE COLUMN `type` `type` ENUM('symbol', 'uniprot', 'NCBI Gene ID') NOT NULL ;
+            """,
+        mysql_conn_id=mysqlConnectorID,
+        database=schemaname
+    )
+
     removeAliasFK = getDropFKTask(dag, schemaname, mysqlConnectorID, 'alias', 'fk_alias_dataset')
 
     createTables = MySqlOperator(
@@ -124,4 +135,6 @@ with DAG(
     )
 
     clearOldData >> removeAliasFK >> \
-    createTables >> fetchGeneIDs >> [saveGeneIDMetadata, saveGeneRIFmetadata, savePubListMetadata]
+    createTables >> \
+    fetchGeneIDs >> [saveGeneIDMetadata, saveGeneRIFmetadata, savePubListMetadata]
+    addNCBIAliasType >> fetchGeneIDs
