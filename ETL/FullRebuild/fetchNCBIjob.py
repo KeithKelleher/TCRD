@@ -18,7 +18,7 @@ sqlFiles = common.getSqlFiles()
 schemaname = common.getNewDatabaseName()
 mysqlConnectorID = common.getGenericConnectionName()
 
-testing = True
+testing = False
 fetch_time = datetime.now()
 formatted_fetch_time = fetch_time.strftime('%Y-%m-%d %H:%M:%S')
 
