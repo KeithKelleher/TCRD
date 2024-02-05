@@ -93,7 +93,7 @@ ontologies = [
         'table': 'uberon',
         'id': 'uid',
         'parent_table': 'uberon_parent',
-        'keylength': '20',
+        'keylength': '30',
         'id_function': relevantUberonIDs,
         'boring_ids': ['CARO:0000000', 'CARO:0030000', 'BFO:0000004', 'BFO:0000002']
     }

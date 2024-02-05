@@ -40,23 +40,23 @@ def getHumanEntities(file):
 def getOntologyMap():
     mysqlserver = common.getMysqlConnector()
     mappings = mysqlserver.get_records(f"""
-SELECT 
-    CONCAT(db, ':', value), GROUP_CONCAT(uberon_xref.uid)
-FROM
-    {schemaname}.uberon_xref,
-    {schemaname}.uberon
-WHERE
-    uberon.uid = uberon_xref.uid
-        AND db = 'bto'
-        AND uberon.uid IN (SELECT DISTINCT
-            uid
+        SELECT 
+            CONCAT(db, ':', value), GROUP_CONCAT(uberon_xref.uid)
         FROM
-            {schemaname}.uberon_xref
+            {schemaname}.uberon_xref,
+            {schemaname}.uberon
         WHERE
-            db = 'fma')
-GROUP BY CONCAT(db, ':', value)
-ORDER BY COUNT(*) DESC
-    """)
+            uberon.uid = uberon_xref.uid
+                AND db = 'bto'
+                AND uberon.uid IN (SELECT DISTINCT
+                    uid
+                FROM
+                    {schemaname}.uberon_xref
+                WHERE
+                    db = 'fma')
+        GROUP BY CONCAT(db, ':', value)
+        ORDER BY COUNT(*) DESC
+            """)
     return dict((bto_id, uberons.split(',')) for (bto_id, uberons) in mappings)
 
 def getENSGMap():

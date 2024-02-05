@@ -43,6 +43,7 @@ def processUberonOBO():
                         if key not in uberon_xref_dict:
                             uberon_xref_dict[key] = (id, db, value)
 
+
         if 'is_a' in data:
             parents = data['is_a']
             for parent in parents:
@@ -56,9 +57,14 @@ def processUberonOBO():
                 definition = matches[0]
         comment = data['comment'] if 'comment' in data else None
         uberon_inserts.append((id, name, definition, comment))
+
+    print(uberon_parent_inserts)
+    scrubbed_parent_inserts = scrub_loops(uberon_parent_inserts)
+    print(scrubbed_parent_inserts)
+
     mysqlserver = common.getMysqlConnector()
     mysqlserver.insert_many_rows(f'{schemaname}.uberon', uberon_inserts, target_fields=('uid', 'name', 'def', 'comment'))
-    mysqlserver.insert_many_rows(f'{schemaname}.uberon_parent', uberon_parent_inserts, target_fields=('uid', 'parent_id'))
+    mysqlserver.insert_many_rows(f'{schemaname}.uberon_parent', scrubbed_parent_inserts, target_fields=('uid', 'parent_id'))
     mysqlserver.insert_many_rows(f'{schemaname}.uberon_xref', [uberon_xref_dict[k] for k in uberon_xref_dict], target_fields=('uid', 'db', 'value'))
 
 
@@ -107,7 +113,8 @@ with DAG(
 
     saveMetadataTask = common.getSaveMetadataTask('Uberon', dag)
 
-    clearOldData >> createTables >> fillTables >> saveMetadataTask
+    clearOldData >> createTables >>\
+    fillTables >> saveMetadataTask
 
 validOntologies = [
     "FMA","EMAPA","MA","UMLS","NCIT","ZFA","BTO","EHDAA2","BAMS","neuronames","VHOG","MESH","BIRNLEX","TAO","EHDAA",
@@ -116,3 +123,40 @@ validOntologies = [
     "UBERON","TGMA","TE","TADS","STID","SPD","SCTID","SAO","PHENOSCAPE","PBA","OGES",
     "OGEM","NOID","NIFSTD","MURDOCH","MPATH","MP","MFMO","MAP","ISBN","HAO","GOC","GO",
     "FMAID","FAO","EVM","ENVO","EMAPS","EHDA","CP","CL","CARO","BSA","BILS","BILA","ANISEED","ABA","AAO"]
+
+
+def getAncestors(root, nodeID, relationships, list, goodList):
+    allParents = [rel for rel in relationships if rel[0] == nodeID]
+    for (me, parent) in allParents:
+        if (parent == root):
+            print('found a loop maybe, does this link cause a problem')
+            print((me, parent))
+            print(root)
+            print(list)
+            return (me, parent)
+
+        list.append((me, parent))
+        allGood = [r for r in goodList if r[0]==me and r[1] == parent]
+        if (len(allGood) == 0):
+            return getAncestors(root, parent, relationships, list, goodList)
+    return None
+
+def scrub_loops(relationships):
+    goodList = []
+    badList = []
+    count = 0
+    for rel in relationships:
+        count += 1
+        if (count % 1000 == 0):
+            print(f"""{count} / {len(relationships)}""")
+        list = []
+        badLink = getAncestors(rel[0], rel[0], relationships, list, goodList)
+        if (badLink):
+            badList.append(badLink)
+        else:
+            goodList.extend(list)
+    scrubbed_list = [rel for rel in relationships if rel not in badList]
+    print(badList)
+    print(len(scrubbed_list))
+    print(len(relationships))
+    return scrubbed_list

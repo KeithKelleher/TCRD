@@ -172,6 +172,7 @@ def insert_many_rows(self, table, rows, target_fields=None, replace=False, **kwa
                     for chunk in chunks:
                         sql = self._generate_insert_sql(table, chunk[0], target_fields, replace, **kwargs)
                         self.log.debug("Generated sql: %s", sql)
+                        print(sql)
                         cur.executemany(sql, chunk)
                 conn.commit()
                 return True

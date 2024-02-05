@@ -202,7 +202,14 @@ with DAG(
             'source': 'Uberon',
             'githubReleaseUrl': 'https://github.com/obophenotype/uberon/releases/latest',
             'githubCallback': parseUberonData,
-            'query': 'ext.obo',
+            'query': 'uberon-full.obo',
+            'onceOnly': False
+        },
+        {
+            'key': 'go',
+            'source': 'Gene Ontology',
+            'baseUrl': 'http://current.geneontology.org/ontology/go.obo',
+            'version': {'version': ''},
             'onceOnly': False
         }
     ]

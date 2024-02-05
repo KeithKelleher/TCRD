@@ -8,7 +8,7 @@ CREATE TABLE `gtex` (
         `tpm_male_rank` decimal(4,3) DEFAULT NULL,
         `tpm_female` decimal(12,6) NULL,
         `tpm_female_rank` decimal(4,3) DEFAULT NULL,
-        `uberon_id` varchar(20) COLLATE utf8_unicode_ci DEFAULT NULL,
+        `uberon_id` varchar(30) COLLATE utf8_unicode_ci DEFAULT NULL,
         PRIMARY KEY (`id`),
         KEY `expression_idx1` (`protein_id`),
         KEY `fk_gtex_uberon` (`uberon_id`),
