@@ -145,13 +145,11 @@ class tdl_computer:
             AND t2tc.protein_id = protein.id
             AND 
             (
-                CASE
-                    WHEN target.fam = 'GPCR' AND act_value >= 7 THEN TRUE
-                    WHEN target.fam = 'Kinase' AND act_value >= 7.52288 THEN TRUE
-                    WHEN target.fam = 'IC' AND act_value >= 5 THEN TRUE
-                    ELSE act_value >= 6
-                END
-            )
+				 (target.fam = 'GPCR' AND act_value >= 7) OR
+				 (target.fam = 'Kinase' AND act_value >= 7.52288) OR
+				 (target.fam = 'IC' AND act_value >= 5) OR
+				 ((target.fam is null or target.fam not in ('IC', 'Kinase', 'GPCR')) and act_value >= 6)
+			 )
     """)
         return data
 
